@@ -1,0 +1,40 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Information about the parent and child",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "childAge": { "type": "string" },
+        "savedExercises": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name", "email"]
+    },
+    "Screening": {
+      "title": "Screening Result",
+      "description": "Results from handwriting or reading analysis",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["handwriting", "reading"] },
+        "limitations": { "type": "array", "items": { "type": "string" } },
+        "riskLevel": { "type": "string", "enum": ["low", "medium", "high"] },
+        "riskDescription": { "type": "string" },
+        "detectedSymptoms": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "riskLevel", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile document"
+    },
+    "/users/{userId}/screenings/{screeningId}": {
+      "schema": "Screening",
+      "description": "History of screenings for the user"
+    }
+  }
+}

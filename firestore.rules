@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // User Profile
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
+      
+      // Screenings subcollection
+      match /screenings/{screeningId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidScreening(request.resource.data);
+        allow update, delete: if false; // Screenings are immutable history
+      }
+    }
+
+    // Validation functions
+    function isValidUser(data) {
+      return data.keys().hasAll(['name', 'email']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.email is string && data.email.matches('^.+@.+\\..+$') && data.email.size() < 100 &&
+             (!('childAge' in data) || (data.childAge is string && data.childAge.size() < 10)) &&
+             (!('savedExercises' in data) || (data.savedExercises is list && data.savedExercises.size() < 50));
+    }
+
+    function isValidScreening(data) {
+      return data.keys().hasAll(['type', 'riskLevel', 'createdAt']) &&
+             data.type in ['handwriting', 'reading'] &&
+             data.riskLevel in ['low', 'medium', 'high'] &&
+             data.createdAt is string && data.createdAt.size() < 50 &&
+             (!('riskDescription' in data) || (data.riskDescription is string && data.riskDescription.size() < 1000)) &&
+             (!('limitations' in data) || (data.limitations is list && data.limitations.size() < 20)) &&
+             (!('detectedSymptoms' in data) || (data.detectedSymptoms is list && data.detectedSymptoms.size() < 20));
+    }
+  }
+}
