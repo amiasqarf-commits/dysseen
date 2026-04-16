@@ -1621,8 +1621,8 @@ export default function App() {
           className="h-full"
         >
           {currentScreen === 'landing' && <LandingScreen />}
-          {currentScreen === 'login' && <LoginScreen />}
-          {currentScreen === 'signup' && <SignupScreen />}
+          {currentScreen === 'login' && LoginScreen()}
+          {currentScreen === 'signup' && SignupScreen()}
           {currentScreen === 'verifyEmail' && <VerifyEmailScreen />}
           {currentScreen === 'forgotPassword' && <ForgotPasswordScreen />}
           {currentScreen === 'home' && <HomeScreen />}
