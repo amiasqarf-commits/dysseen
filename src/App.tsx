@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Home, 
@@ -30,7 +30,9 @@ import {
   AlertTriangle,
   Trash2,
   Eye,
-  EyeOff
+  EyeOff,
+  Check,
+  Info
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -51,7 +53,7 @@ import { doc, setDoc, getDoc, collection, addDoc, query, where, getDocs } from '
 import { translations, Language } from './translations';
 
 // --- Types ---
-type Screen = 'landing' | 'login' | 'signup' | 'verifyEmail' | 'forgotPassword' | 'home' | 'screening' | 'handwriting' | 'reading' | 'scanning' | 'results' | 'profile' | 'settings' | 'learnMore' | 'recommendations';
+type Screen = 'landing' | 'login' | 'signup' | 'verifyEmail' | 'forgotPassword' | 'home' | 'screening' | 'handwriting' | 'reading' | 'scanning' | 'results' | 'profile' | 'settings' | 'learnMore' | 'recommendations' | 'userAgreement' | 'exercises' | 'recognition';
 
 interface UserData {
   name: string;
@@ -165,6 +167,8 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('landing');
   const [user, setUser] = useState<UserData | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editName, setEditName] = useState('');
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -174,8 +178,15 @@ export default function App() {
   const [error, setError] = useState('');
 
   const [signupData, setSignupData] = useState({ name: '', email: '', password: '', age: '' });
+  const [isConsentChecked, setIsConsentChecked] = useState(false);
   const [signupError, setSignupError] = useState('');
   const [showSignupPassword, setShowSignupPassword] = useState(false);
+
+  // Recognition Task States
+  const [recognitionStep, setRecognitionStep] = useState(0);
+  const [recognitionErrors, setRecognitionErrors] = useState(0);
+  const [recognitionType, setRecognitionType] = useState<'letters' | 'numbers'>('letters');
+  const [recognitionFinished, setRecognitionFinished] = useState(false);
 
   // Analysis States
   const [lastResult, setLastResult] = useState<AnalysisResult | null>(null);
@@ -252,6 +263,18 @@ export default function App() {
       await setDoc(doc(db, 'users', userId), { savedExercises: newSaved }, { merge: true });
     } catch (err) {
       console.error("Error saving exercise:", err);
+    }
+  };
+
+  const handleUpdateProfile = async () => {
+    if (!userId || !editName.trim()) return;
+    try {
+      await setDoc(doc(db, 'users', userId), { name: editName }, { merge: true });
+      setUser(prev => prev ? { ...prev, name: editName } : null);
+      setIsEditingProfile(false);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to update profile");
     }
   };
 
@@ -471,7 +494,7 @@ export default function App() {
           }
         };
 
-        const prompt = `Analyze this image of a child's handwriting for potential signs of dysgraphia.
+        const prompt = `Analyze this image of a child's handwriting for potential signs of dysgraphia and dyscalculia.
         Look for these symptoms:
         1. irregularSize: Irregular letter sizing.
         2. poorSpatial: Poor spatial awareness (writing outside lines).
@@ -479,6 +502,17 @@ export default function App() {
         4. mixingStyles: Mixing cursive and print styles.
         5. illegible: Illegible handwriting in some areas.
         6. visualErrors: Writing letters that look similar to others incorrectly.
+        7. mathConfusion: Confusing mathematical symbols or digits (e.g. 6 and 9, > and <, + and x).
+        8. wrongDirection: Incorrect writing direction (bottom-to-top or right-to-left).
+        9. gridMisalignment: Difficulty fitting digits into grid cells correctly.
+        10. phoneticSubstitutions: Substituting letters that sound similar.
+        11. letterReversal: Mirroring or flipping letters/syllables.
+
+        Special attention to:
+        - Inability to start counting from 5+.
+        - Use of fingers for simple math.
+        - Incorrect stroke order/direction.
+        - Spatial confusion in grid paper.
 
         Generate a realistic analysis result in JSON format:
         {
@@ -548,7 +582,8 @@ export default function App() {
         animate={{ y: 0, opacity: 1 }}
         className="text-7xl font-black flex items-baseline gap-0.5 mb-20 drop-shadow-sm z-10"
       >
-        <span style={{ color: COLORS.pink }}>Dy</span>
+        <span style={{ color: COLORS.pink }}>D</span>
+        <span style={{ color: '#3DC7B7' }}>y</span>
         <span style={{ color: COLORS.yellow }}>s</span>
         <span className="text-black">Seen</span>
       </motion.div>
@@ -659,6 +694,15 @@ export default function App() {
         setSignupError(t.signup.fillFields);
         return;
       }
+      if (!isConsentChecked) {
+        setSignupError(t.signup.consentError);
+        return;
+      }
+      const ageNum = parseInt(signupData.age);
+      if (isNaN(ageNum) || ageNum < 6 || ageNum > 14) {
+        setSignupError(t.signup.ageError);
+        return;
+      }
       handleSignup({
         name: signupData.name,
         email: signupData.email,
@@ -722,6 +766,8 @@ export default function App() {
             <label className="block text-lg font-black mb-2 ml-4">{t.signup.childAge}</label>
             <input 
               type="number" 
+              min="6"
+              max="14"
               value={signupData.age}
               onChange={(e) => setSignupData({...signupData, age: e.target.value})}
               className="w-full bg-[#B9F2EB] rounded-3xl py-5 px-8 focus:outline-none shadow-inner" 
@@ -729,8 +775,23 @@ export default function App() {
           </div>
 
           <div className="flex items-start gap-4 px-2">
-            <input type="checkbox" className="mt-1 w-6 h-6 rounded-lg border-[#3DC7B7] text-[#3DC7B7] focus:ring-[#3DC7B7]" required />
-            <span className="text-sm font-bold text-gray-700 leading-tight">{t.signup.consent}</span>
+            <input 
+              type="checkbox" 
+              checked={isConsentChecked}
+              onChange={(e) => setIsConsentChecked(e.target.checked)}
+              className="mt-1 w-6 h-6 rounded-lg border-[#3DC7B7] text-[#3DC7B7] focus:ring-[#3DC7B7]" 
+            />
+            <span className="text-sm font-bold text-gray-700 leading-tight">
+              {t.signup.consentPrefix}
+              <button 
+                type="button"
+                onClick={() => setCurrentScreen('userAgreement')}
+                className="text-[#3DC7B7] underline decoration-2 underline-offset-2 hover:text-[#2ba89a] transition-colors"
+              >
+                {t.signup.consentLink}
+              </button>
+              {t.signup.consentSuffix}
+            </span>
           </div>
 
           {signupError && <p className="text-red-500 text-center font-bold">{signupError}</p>}
@@ -790,32 +851,6 @@ export default function App() {
         </p>
 
         {error && <p className="text-red-500 font-bold">{error}</p>}
-
-        <button 
-          onClick={async () => {
-            if (auth.currentUser) {
-              await auth.currentUser.reload();
-              if (auth.currentUser.emailVerified) {
-                // Trigger the auth listener by slightly changing state or just manually navigating
-                // Since onAuthStateChanged might not fire on reload, we can manually check
-                const firebaseUser = auth.currentUser;
-                setUserId(firebaseUser.uid);
-                const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-                if (userDoc.exists()) {
-                  const data = userDoc.data() as UserData & { savedExercises?: string[] };
-                  setUser({ name: data.name, email: data.email, childAge: data.childAge });
-                  setSavedExercises(data.savedExercises || []);
-                  setCurrentScreen('home');
-                }
-              } else {
-                setError(t.verify.notVerified);
-              }
-            }
-          }}
-          className="w-full bg-white border-2 border-[#3DC7B7] text-black font-black py-5 rounded-[40px] text-2xl shadow-lg active:scale-95 transition-transform uppercase mb-4"
-        >
-          {t.verify.checkStatus}
-        </button>
 
         <button 
           onClick={async () => {
@@ -968,15 +1003,15 @@ export default function App() {
         </button>
 
         <button 
-          onClick={() => setCurrentScreen('recommendations')}
+          onClick={() => setCurrentScreen('recognition')}
           className="w-full text-left bg-[#E8E8E8] p-8 rounded-[40px] flex gap-5 items-start shadow-sm border border-white/50 active:scale-[0.98] transition-transform"
         >
           <div className="bg-white p-4 rounded-2xl shadow-sm">
             <Sparkles className="text-black" size={28} />
           </div>
           <div>
-            <h3 className="font-black text-xl">{t.screening.exercises}</h3>
-            <p className="text-base text-gray-600 mt-2 leading-snug">{t.screening.exercisesDesc}</p>
+            <h3 className="font-black text-xl">{t.screening.recognition}</h3>
+            <p className="text-base text-gray-600 mt-2 leading-snug">{t.screening.recognitionDesc}</p>
           </div>
         </button>
       </div>
@@ -1294,21 +1329,49 @@ export default function App() {
         <div className="w-24 h-24 bg-white rounded-3xl border-[3px] border-black flex items-center justify-center overflow-hidden shadow-md">
           <User size={64} className="text-gray-200" />
         </div>
-        <div>
-          <h2 className="text-2xl font-black">{user?.name || 'Исмаил Батырхан'}</h2>
-          <p className="text-lg text-gray-500 font-bold">{user?.email || 'batyr@example.com'}</p>
+        <div className="flex-1">
+          {isEditingProfile ? (
+            <div className="space-y-2">
+              <input 
+                type="text" 
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="w-full bg-white rounded-xl py-2 px-4 font-bold border-2 border-black focus:outline-none"
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <button 
+                  onClick={handleUpdateProfile}
+                  className="bg-black text-white px-4 py-1 rounded-full text-sm font-black uppercase"
+                >
+                  {t.profile.save}
+                </button>
+                <button 
+                  onClick={() => setIsEditingProfile(false)}
+                  className="bg-gray-200 text-black px-4 py-1 rounded-full text-sm font-black uppercase"
+                >
+                  {t.profile.cancel}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <h2 className="text-2xl font-black">{user?.name || 'Исмаил Батырхан'}</h2>
+              <p className="text-lg text-gray-500 font-bold">{user?.email || 'batyr@example.com'}</p>
+            </>
+          )}
         </div>
       </div>
 
       <div className="flex items-stretch gap-6 mb-10">
-        <div className="flex-1 bg-[#E8E8E8] p-6 rounded-[32px] text-center shadow-sm border border-white/50 flex flex-col justify-center">
+        <div className="flex-1 bg-white p-6 rounded-[32px] text-center shadow-sm border border-gray-100 flex flex-col justify-center">
           <div className="flex items-center justify-center gap-2 mb-2">
             <History size={20} className="text-black" />
             <span className="text-3xl font-black">{screeningHistory.length}</span>
           </div>
           <p className="text-xs font-black uppercase text-gray-600 tracking-wider leading-tight">{t.profile.screenings}</p>
         </div>
-        <div className="flex-1 bg-[#E8E8E8] p-6 rounded-[32px] text-center shadow-sm border border-white/50 flex flex-col justify-center">
+        <div className="flex-1 bg-white p-6 rounded-[32px] text-center shadow-sm border border-gray-100 flex flex-col justify-center">
           <div className="flex items-center justify-center gap-2 mb-2">
             <Clock size={20} className="text-black" />
             <span className="text-3xl font-black">{savedExercises.length}</span>
@@ -1317,14 +1380,18 @@ export default function App() {
         </div>
       </div>
 
-      <button className="w-full bg-white border-2 border-gray-100 py-3 rounded-full font-black text-lg mb-12 shadow-sm active:bg-gray-50">
+      <button 
+        onClick={() => {
+          setEditName(user?.name || '');
+          setIsEditingProfile(true);
+        }}
+        className="w-full bg-white border-2 border-gray-100 py-4 rounded-full font-black text-xl mb-6 shadow-sm active:bg-gray-50 uppercase tracking-tight"
+      >
         {t.profile.edit}
       </button>
 
-      <div className="mb-6 flex justify-center">
-        <span className="bg-white px-8 py-2 rounded-full border-2 border-gray-100 font-black text-lg shadow-md inline-block whitespace-nowrap">
-          {t.profile.history}
-        </span>
+      <div className="mb-12 w-full bg-white py-4 rounded-full border-2 border-gray-100 font-black text-xl shadow-md text-center uppercase tracking-tight">
+        {t.profile.history}
       </div>
 
       <div className="space-y-4">
@@ -1368,6 +1435,144 @@ export default function App() {
       )}
 
       <BottomNav active="profile" onNavigate={setCurrentScreen} />
+    </div>
+  );
+
+  const RecognitionScreen = () => {
+    const tasks = recognitionType === 'letters' ? t.recognition.letterTasks : t.recognition.numberTasks;
+    const currentTask = tasks[recognitionStep];
+    const isLastStep = recognitionStep === tasks.length - 1;
+
+    const shuffledOptions = useMemo(() => {
+      if (!currentTask) return [];
+      return [...currentTask.options].sort(() => Math.random() - 0.5);
+    }, [currentTask]);
+
+    const handleOptionClick = (opt: string) => {
+      if (opt !== currentTask.correct) {
+        setRecognitionErrors(prev => prev + 1);
+      }
+      
+      if (isLastStep) {
+        setRecognitionFinished(true);
+      } else {
+        setRecognitionStep(prev => prev + 1);
+      }
+    };
+
+    const resetRecognition = () => {
+      setRecognitionStep(0);
+      setRecognitionErrors(0);
+      setRecognitionFinished(false);
+    };
+
+    if (recognitionFinished) {
+      const hasRisk = recognitionErrors > 2;
+      return (
+        <div className="h-full flex flex-col bg-white p-10 items-center justify-center text-center">
+          <div className={cn(
+            "w-24 h-24 rounded-full flex items-center justify-center mb-8",
+            hasRisk ? "bg-red-100 text-red-500" : "bg-green-100 text-green-500"
+          )}>
+            {hasRisk ? <AlertTriangle size={48} /> : <Check size={48} />}
+          </div>
+          <h2 className="text-3xl font-black mb-4">
+            {hasRisk ? t.recognition.riskDetected : t.recognition.noRisk}
+          </h2>
+          <p className="text-gray-600 font-bold mb-10 leading-relaxed">
+            {hasRisk ? t.recognition.riskDesc : t.recognition.noRiskDesc}
+          </p>
+          <button 
+            onClick={() => {
+              resetRecognition();
+              setCurrentScreen('screening');
+            }}
+            className="w-full bg-black text-white p-6 rounded-3xl font-black text-xl shadow-lg active:scale-95 transition-transform"
+          >
+            {t.recognition.finish}
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="h-full flex flex-col bg-[#FDF2F8] p-10">
+        <button 
+          onClick={() => {
+            resetRecognition();
+            setCurrentScreen('screening');
+          }} 
+          className="mb-10 flex items-center gap-3 font-black text-xl"
+        >
+          <ArrowLeft size={28} /> {t.recognition.back}
+        </button>
+
+        <div className="flex-1 flex flex-col items-center justify-center">
+          <div className="bg-white p-8 rounded-[40px] shadow-xl border-2 border-pink-100 w-full max-w-sm">
+            <h2 className="text-2xl font-black text-center mb-8 text-pink-600">
+              {recognitionType === 'letters' ? t.recognition.letterTask : t.recognition.numberTask}
+            </h2>
+            
+            <div className="grid grid-cols-2 gap-6">
+              {shuffledOptions.map((opt: string, i: number) => (
+                <button
+                  key={i}
+                  onClick={() => handleOptionClick(opt)}
+                  className="aspect-square bg-gray-50 rounded-3xl flex items-center justify-center text-5xl font-black text-gray-800 hover:bg-pink-50 hover:text-pink-600 transition-all active:scale-90 border-2 border-transparent hover:border-pink-200 shadow-sm"
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-10 flex justify-center gap-2">
+              {tasks.map((_: any, i: number) => (
+                <div 
+                  key={i} 
+                  className={cn(
+                    "h-2 rounded-full transition-all duration-300",
+                    i === recognitionStep ? "w-8 bg-pink-500" : i < recognitionStep ? "w-2 bg-pink-200" : "w-2 bg-gray-200"
+                  )} 
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-4 mt-10">
+          <button 
+            onClick={() => {
+              resetRecognition();
+              setRecognitionType(prev => prev === 'letters' ? 'numbers' : 'letters');
+            }}
+            className="flex-1 bg-white border-2 border-pink-200 text-pink-500 p-6 rounded-3xl font-black text-xl shadow-sm active:scale-95 transition-transform"
+          >
+            {recognitionType === 'letters' ? '123' : 'ABC'}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const UserAgreementScreen = () => (
+    <div className="h-full flex flex-col bg-white overflow-hidden">
+      <div className="p-6 border-b border-gray-100 flex items-center gap-4">
+        <button onClick={() => setCurrentScreen('signup')} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+          <ArrowLeft size={24} />
+        </button>
+        <h1 className="text-2xl font-black">{t.userAgreement.title}</h1>
+      </div>
+      
+      <div className="flex-1 overflow-y-auto p-8 space-y-8 pb-20">
+        {t.userAgreement.sections.map((section: any, i: number) => (
+          <div key={i} className="space-y-3">
+            <h2 className="text-xl font-black text-gray-900">{section.title}</h2>
+            <p className="text-gray-600 font-medium leading-relaxed whitespace-pre-line">
+              {section.content}
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 
@@ -1415,21 +1620,23 @@ export default function App() {
           transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
           className="h-full"
         >
-          {currentScreen === 'landing' && LandingScreen()}
-          {currentScreen === 'login' && LoginScreen()}
-          {currentScreen === 'signup' && SignupScreen()}
-          {currentScreen === 'verifyEmail' && VerifyEmailScreen()}
-          {currentScreen === 'forgotPassword' && ForgotPasswordScreen()}
-          {currentScreen === 'home' && HomeScreen()}
-          {currentScreen === 'screening' && ScreeningScreen()}
-          {currentScreen === 'handwriting' && HandwritingScreen()}
-          {currentScreen === 'reading' && ReadingScreen()}
-          {currentScreen === 'scanning' && ScanningScreen()}
-          {currentScreen === 'results' && ResultsScreen()}
-          {currentScreen === 'profile' && ProfileScreen()}
-          {currentScreen === 'settings' && SettingsScreen()}
-          {currentScreen === 'learnMore' && LearnMoreScreen()}
-          {currentScreen === 'recommendations' && RecommendationsScreen()}
+          {currentScreen === 'landing' && <LandingScreen />}
+          {currentScreen === 'login' && <LoginScreen />}
+          {currentScreen === 'signup' && <SignupScreen />}
+          {currentScreen === 'verifyEmail' && <VerifyEmailScreen />}
+          {currentScreen === 'forgotPassword' && <ForgotPasswordScreen />}
+          {currentScreen === 'home' && <HomeScreen />}
+          {currentScreen === 'screening' && <ScreeningScreen />}
+          {currentScreen === 'handwriting' && <HandwritingScreen />}
+          {currentScreen === 'reading' && <ReadingScreen />}
+          {currentScreen === 'scanning' && <ScanningScreen />}
+          {currentScreen === 'results' && <ResultsScreen />}
+          {currentScreen === 'profile' && <ProfileScreen />}
+          {currentScreen === 'settings' && <SettingsScreen />}
+          {currentScreen === 'learnMore' && <LearnMoreScreen />}
+          {currentScreen === 'recommendations' && <RecommendationsScreen />}
+          {currentScreen === 'userAgreement' && <UserAgreementScreen />}
+          {currentScreen === 'recognition' && <RecognitionScreen />}
         </motion.div>
       </AnimatePresence>
     </div>

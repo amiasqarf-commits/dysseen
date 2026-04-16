@@ -1,7 +1,9 @@
 {
-  "name": "DysSeen Prototype",
+  "name": "DysSeen app",
   "description": "A mobile app prototype for early detection of learning difficulties, featuring AI screening, exercise tracking, and user profiles.",
   "requestFramePermissions": [
     "camera"
-  ]
+  ],
+  "C7": [],
+  "aq": []
 }
